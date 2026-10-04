@@ -15,6 +15,18 @@ export function routingPlan(data,nodes,rowH){
   portY(n,side,owner){const owners=[...(ports.get(n.id+'|'+side)||[])],i=owners.indexOf(owner);return n.y+n.h*(.25+.5*(i+1)/(owners.length+1));}
  };
 }
+// Large trees share one clear gutter per generation instead of reserving a
+// separate lane for every family, which would make the SVG enormous.
+export function compactRoutingPlan(nodes,rowH){
+ const rowY=new Map(),ranks=[...rowH.keys()].sort((a,b)=>a-b);let height=0;
+ for(const rank of ranks){rowY.set(rank,height);height+=rowH.get(rank)+150;}
+ for(const n of nodes.values())n.y=rowY.get(n.rank)+(rowH.get(n.rank)-n.h)/2;
+ return {rowY,height,laneRows:[],
+  laneY(rank){return rowY.has(rank)?rowY.get(rank)+rowH.get(rank)+68:rank<ranks[0]?-48:height+48;},
+  portX(n){return n.x+n.w/2;},
+  portY(n){return n.y+n.h/2;}
+ };
+}
 // Reorder independent family channels by their actual endpoints, before adding bridges.
 export function optimizeFamilyLanes(edges,laneRows){
  const changes=new Map();

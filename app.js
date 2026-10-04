@@ -1,6 +1,6 @@
 import {savedGedcom,readView,saveView} from './storage.js?v=04a44ecce2d9';
-import {routeLocal,pathData,labelSegment,associationLabel,bridgePaths,routingPlan,associationKey,associationRoute,optimizeFamilyLanes} from './routing.js?v=e078423fbbf2';
-import {parseGedcom,dateRu,dateSortKey,lifespan,relatives,relationships,layout,privacyVisible,unconfirmedAncestry,directWithGodparents,isGodparentRelation,EVENT_LABELS,spouseLabel} from './genealogy.js?v=858317a70f69';
+import {routeLocal,pathData,labelSegment,associationLabel,bridgePaths,routingPlan,compactRoutingPlan,associationKey,associationRoute,optimizeFamilyLanes} from './routing.js?v=large-tree-1';
+import {parseGedcom,dateRu,dateSortKey,lifespan,relatives,relationships,layout,privacyVisible,unconfirmedAncestry,directWithGodparents,isGodparentRelation,EVENT_LABELS,spouseLabel} from './genealogy.js?v=large-tree-1';
 import {demo} from './demo.js?v=fe30088a95e8';
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let data,focus,sets,relations,graph,onlyDirect=false,showGodparents=false,hidePrivate=false,verticalBranches=false,opened=null,isDemo=true,filename='',camera={x:0,y:0,k:1},toastTimer,cameraAnimation=0;
@@ -17,13 +17,16 @@ function render(){
  const directView=onlyDirect&&showGodparents?directWithGodparents(data,sets.direct):null,candidates=onlyDirect?(directView?.visible||sets.direct):new Set(data.people.keys()),visible=hidePrivate?privacyVisible(data,candidates,focus):candidates;graph=layout(data,visible,sets,{verticalBranches,directMode:onlyDirect,associationAnchors:directView?.detachedAnchors});
  // Allow full names and exact dates to determine height; all cards in a generation share a centre line.
  const rowH=new Map();for(const n of graph.nodes.values()){const p=data.people.get(n.id),hidden=privateHidden(n.id);n.privacyHidden=hidden;n.nameLines=wrap(shownName(n.id),n.w-34,`${n.direct?17:14}px Georgia`);n.variantLines=hidden?[]:p.nameVariants.flatMap(text=>wrap(text,n.w-34,`${n.direct?12:11}px Arial`));n.dateLines=wrap(shownLifespan(p),n.w-34,`${n.direct?12:11}px Arial`);n.relationLabel=hidden?'ЛИЧНАЯ ЗАПИСЬ':n.id===focus?'ВЫБРАННЫЙ ЧЕЛОВЕК':relations.labels.get(n.id);n.relationLines=wrap(n.relationLabel,n.w-28,`${n.id===focus?9:11}px Arial`);n.h=Math.max(n.h,38+n.nameLines.length*(n.direct?22:19)+(n.variantLines.length?4+n.variantLines.length*15:0)+n.dateLines.length*16+n.relationLines.length*14+14);rowH.set(n.rank,Math.max(rowH.get(n.rank)||0,n.h));}
- const plan=routingPlan(data,graph.nodes,rowH),rowY=plan.rowY,unconfirmed=unconfirmedAncestry(data,sets.direct);
+ const largeTree=graph.nodes.size>=700,plan=largeTree?compactRoutingPlan(graph.nodes,rowH):routingPlan(data,graph.nodes,rowH),rowY=plan.rowY,unconfirmed=unconfirmedAncestry(data,sets.direct);
  graph.bounds.h=plan.height+140;graph.bounds.y=-100;
  const lines=[],cards=[],edgeLabels=[],edgeRecords=[],markers=[];let edgeIndex=0,labelIndex=0,edgeOwner='';
  const below=n=>plan.laneY(n.rank,edgeOwner);
  const above=n=>plan.laneY(n.rank-1,edgeOwner);
  const port=(n,side)=>plan.portX(n,side,edgeOwner);
- const route=(a,b)=>routeLocal(a,b,graph.nodes,edgeIndex,edgeRecords,edgeOwner);
+ const route=(a,b)=>largeTree?[[a[0],a[1]],[a[0],(a[1]+b[1])/2],[b[0],(a[1]+b[1])/2],[b[0],b[1]]]:routeLocal(a,b,graph.nodes,edgeIndex,edgeRecords,edgeOwner);
+ const linksByFamilyChild=new Map(),parentFamilyCount=new Map();
+ for(const link of data.links){const key=link.family+'|'+link.child;if(!linksByFamilyChild.has(key))linksByFamilyChild.set(key,[]);linksByFamilyChild.get(key).push(link);}
+ for(const family of data.families)if(family.parents.some(id=>graph.nodes.has(id)))for(const child of family.children)parentFamilyCount.set(child,(parentFamilyCount.get(child)||0)+1);
  const extend=points=>{for(const [x,y] of points){const right=Math.max(graph.bounds.x+graph.bounds.w,x+45),bottom=Math.max(graph.bounds.y+graph.bounds.h,y+45);graph.bounds.x=Math.min(graph.bounds.x,x-45);graph.bounds.y=Math.min(graph.bounds.y,y-45);graph.bounds.w=right-graph.bounds.x;graph.bounds.h=bottom-graph.bounds.y;}};
  const path=(points,color='#a6b09a',width=1.4,dash='',title='',caption='')=>{
   extend(points);const id=`edge-${labelIndex++}`;
@@ -39,7 +42,7 @@ function render(){
    edgeIndex++;continue;
   }
   const sorted=[...ps].sort((a,b)=>a.x-b.x),a=sorted[0],b=sorted[sorted.length-1];
-  const adjacent=ps.length===2&&a.rank===b.rank&&![...graph.nodes.values()].some(n=>!ps.includes(n)&&n.rank===a.rank&&n.x>a.x&&n.x<b.x);
+  const adjacent=ps.length===2&&a.rank===b.rank&&(largeTree?b.x-a.x-a.w<45:![...graph.nodes.values()].some(n=>!ps.includes(n)&&n.rank===a.rank&&n.x>a.x&&n.x<b.x));
   if(adjacent){
    hx=(a.x+a.w+b.x)/2;hy=a.y+a.h/2;exitY=below(a);
    lines.push(path([[a.x+a.w,hy],[b.x,hy]],color,1.5,'',familyPrivate?'Личная семейная связь':family.events.filter(e=>!hidePrivate||!e.private).map(e=>`${EVENT_LABELS[e.tag]}: ${dateRu(e.date)}`).join('; ')||'Супружеская / семейная связь'));
@@ -49,7 +52,7 @@ function render(){
   }
   if(ps.length>1)markers.push({owner:edgeOwner,x:hx,y:hy,color});
   for(const c of cs){
-   const links=data.links.filter(l=>l.family===family.id&&l.child===c.id),adopted=links.some(l=>!l.biological),disputed=links.some(l=>l.uncertain),branchUnconfirmed=family.unconfirmedRelationship||unconfirmed.ancestors.has(c.id)||links.some(l=>unconfirmed.roots.has(l.parent)),uncertain=disputed||branchUnconfirmed,shownParentFamilies=data.families.filter(f=>f.children.includes(c.id)&&f.parents.some(id=>graph.nodes.has(id))).length,cx=shownParentFamilies===1?c.x+c.w/2:port(c,'top');
+   const links=linksByFamilyChild.get(family.id+'|'+c.id)||[],adopted=links.some(l=>!l.biological),disputed=links.some(l=>l.uncertain),branchUnconfirmed=family.unconfirmedRelationship||unconfirmed.ancestors.has(c.id)||links.some(l=>unconfirmed.roots.has(l.parent)),uncertain=disputed||branchUnconfirmed,shownParentFamilies=parentFamilyCount.get(c.id)||0,cx=shownParentFamilies===1?c.x+c.w/2:port(c,'top');
    const caption=disputed?'Спорное родительство':adopted?'Приёмная связь':'',edgeColor=branchUnconfirmed?'#a76552':color,edgeTitle=branchUnconfirmed?'Родство не подтверждено':familyPrivate?'Личная семейная связь':caption||ps.map(n=>shownName(n.id)).join(' + ')+' → '+shownName(c.id);
    let points;
    if(c.rank===Math.max(...ps.map(p=>p.rank))+1)points=[[hx,hy],[hx,exitY],[cx,exitY],[cx,c.y]];
@@ -57,7 +60,7 @@ function render(){
    lines.push(path(points,edgeColor,primary?1.8:1.35,uncertain?'8 6':'',edgeTitle,familyPrivate?'':caption));
   }edgeIndex++;
  }
- const laneChanges=optimizeFamilyLanes(edgeRecords,plan.laneRows);
+ const laneChanges=largeTree?new Map():optimizeFamilyLanes(edgeRecords,plan.laneRows);
  const assocSeen=new Set();for(const p of data.people.values()){
   const a=graph.nodes.get(p.id);if(!a)continue;
  for(const assoc of p.associations){
@@ -65,7 +68,7 @@ function render(){
    const b=graph.nodes.get(assoc.id);if(!b)continue;
    const associationPrivate=privateHidden(p.id)||privateHidden(assoc.id),caption=associationPrivate?'Личная связь':associationLabel(assoc.relation,data.people.get(assoc.id).sex),key=associationKey(p.id,assoc,data);
    if(assocSeen.has(key))continue;assocSeen.add(key);edgeIndex++;edgeOwner=`association:${key}`;
-   const points=associationRoute(a,b,graph.nodes,plan,edgeRecords,edgeOwner,/^Восприем/.test(caption));
+   const points=largeTree?(()=>{const upward=/^Восприем/.test(caption),sx=a.x+a.w*(upward?(b.x<a.x?.25:.75):.5),sy=upward?a.y:a.y+a.h,tx=b.x+b.w/2,ty=upward?b.y+b.h:b.y,mid=(sy+ty)/2;return [[sx,sy],[sx,mid],[tx,mid],[tx,ty]];})():associationRoute(a,b,graph.nodes,plan,edgeRecords,edgeOwner,/^Восприем/.test(caption));
    lines.push(path(points,'#9b7147',1.6,'7 5',associationPrivate?'Личная связь':`${shownName(assoc.id)} — ${caption.toLowerCase()} для ${shownName(p.id)}`,caption));
   }
  }
@@ -79,7 +82,7 @@ function render(){
  }
  for(const marker of markers)lines.push(`<circle cx="${marker.x}" cy="${laneChanges.get(marker.owner+'|'+marker.y)??marker.y}" r="3" fill="${marker.color}"/>`);
  for(const e of edgeRecords)if(e.caption){edgeLabels.push(`<path id="${e.id}" d="${pathData(labelSegment(e.points))}" fill="none" stroke="none"/><text class="edge-caption" fill="${e.color}" font-family="Arial,sans-serif" font-size="13" dy="-6" text-anchor="middle"><textPath href="#${e.id}" startOffset="50%">${esc(e.caption)}</textPath></text>`);}
- const bridged=bridgePaths(edgeRecords);const connections=edgeRecords.map((e,i)=>`<g class="relationship-line"><title>${esc(e.title)}</title><path class="relationship-stroke" d="${bridged[i]}" fill="none" stroke="${e.color}" stroke-width="${e.width}" stroke-linejoin="round" stroke-linecap="${e.dash?'round':'square'}" ${e.dash?`stroke-dasharray="${e.dash}"`:''}/></g>`).join('');
+ const bridged=largeTree?edgeRecords.map(e=>pathData(e.points)):bridgePaths(edgeRecords);const connections=edgeRecords.map((e,i)=>`<g class="relationship-line"><title>${esc(e.title)}</title><path class="relationship-stroke" d="${bridged[i]}" fill="none" stroke="${e.color}" stroke-width="${e.width}" stroke-linejoin="round" stroke-linecap="${e.dash?'round':'square'}" ${e.dash?`stroke-dasharray="${e.dash}"`:''}/></g>`).join('');
  $('scene').innerHTML=edgeLabels.join('')+connections+lines.join('')+cards.join('');$('count-all').textContent=data.people.size;$('count-direct').textContent=sets.direct.size;$('visible-count').textContent=`Показано ${visible.size} из ${data.people.size}`;$('view-label').textContent=onlyDirect?(showGodparents?'ПРЯМАЯ ЛИНИЯ + ВОСПРИЕМНИКИ':'ПРЯМАЯ ЛИНИЯ'):'ВСЁ ДРЕВО';$('tree-title').textContent=onlyDirect?(showGodparents?'Предки, потомки и восприемники':'Предки и потомки'):'Семейные связи';$('direct-toggle').setAttribute('aria-checked',String(onlyDirect));$('godparents-toggle').setAttribute('aria-checked',String(showGodparents));$('godparents-toggle').disabled=!onlyDirect;$('godparents-option').classList.toggle('inactive',!onlyDirect);$('privacy-toggle').setAttribute('aria-checked',String(hidePrivate));$('branches-toggle').setAttribute('aria-checked',String(verticalBranches));const p=data.people.get(focus),focusName=shownName(focus),focusLife=shownLifespan(p);$('focus-person').innerHTML=`<span class="avatar">${esc(focusName[0])}</span><span><strong>${esc(focusName)}</strong><small>${esc(focusLife||(privateHidden(focus)?'Запись скрыта':'Даты не указаны'))}</small></span>`;applyCamera();
 }
 function applyCamera(save=true){if(save&&!restoring&&!isDemo)saveView({filename,focus,onlyDirect,showGodparents,hidePrivate,verticalBranches,camera});$('scene').setAttribute('transform',`translate(${camera.x} ${camera.y}) scale(${camera.k})`);$('zoom-value').textContent=Math.round(camera.k*100)+'%';}
@@ -124,7 +127,7 @@ let dragDepth=0;document.addEventListener('dragenter',e=>{if(e.dataTransfer.type
 $('export').onclick=()=>{const b=graph.bounds,svg=`<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(b.w)}" height="${Math.ceil(b.h+90)}" viewBox="${b.x} ${b.y-90} ${b.w} ${b.h+90}"><rect x="${b.x}" y="${b.y-90}" width="${b.w}" height="${b.h+90}" fill="#f4f3ec"/><text x="${b.x+40}" y="${b.y-35}" font-size="27" font-family="Georgia" fill="#28483e">Родословная · ${esc(shownName(focus))}</text><text x="${b.x+40}" y="${b.y-8}" font-size="14" font-family="Arial" fill="#718166">${onlyDirect?'Прямая линия':'Все люди'} · ${graph.nodes.size} из ${data.people.size} · крупные карточки — прямая линия${onlyDirect&&showGodparents?' · восприемники показаны':''}${hidePrivate?' · личное скрыто':''}${verticalBranches?' · ветки вверх':''}</text>${$('scene').innerHTML}</svg>`;const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='Родословная.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('Векторное древо сохранено. Его можно масштабировать без потери качества.');};
 let previousViewport;new ResizeObserver(entries=>{const rect=entries[0].contentRect;if(previousViewport&&graph){camera.x+=(rect.width-previousViewport.width)/2;camera.y+=(rect.height-previousViewport.height)/2;applyCamera();}previousViewport={width:rect.width,height:rect.height};}).observe($('viewport'));
 try{
- const saved=await savedGedcom(),view=readView();
+ const saved=new URLSearchParams(location.search).has('safe')?null:await savedGedcom(),view=readView();
  if(saved?.text){load(saved.text,saved.name);if(view?.filename===saved.name){if(data.people.has(view.focus))focus=view.focus;onlyDirect=!!view.onlyDirect;showGodparents=!!view.showGodparents;hidePrivate=!!view.hidePrivate;verticalBranches=!!view.verticalBranches;recalculate();if(view.camera&&['x','y','k'].every(k=>Number.isFinite(view.camera[k]))&&view.camera.k>0){camera=view.camera;applyCamera();}else fit();}}
  else load(demo,'Пример семейного древа',true);
 }catch{load(demo,'Пример семейного древа',true);}

@@ -257,6 +257,21 @@ export function layout(data,visible,sets,options={}){
    const width=x-85;for(const g of row){g.x-=width/2;positions.set(g.id,g.x+g.width/2);}
   }
  }
+ // The detailed collision solver is intended for a few hundred cards. On a
+ // large GEDCOM its repeated all-pairs scans can lock the browser for minutes.
+ // The barycentric passes above already give every person a stable generation
+ // and family column, so keep that result and avoid the quadratic refinements.
+ if(ids.length>=700){
+  for(const g of groups.values())if(g.people.length>1){
+   g.people.sort((a,b)=>({M:0,F:2}[data.people.get(a)?.sex]??1)-({M:0,F:2}[data.people.get(b)?.sex]??1));
+   setOffsets(g);
+  }
+  const origin=(positions.get(groupOf.get(focusId))||0)+(groups.get(groupOf.get(focusId))?.offsets.get(focusId)||0),nodes=new Map();
+  for(const g of groups.values()){let x=g.x-origin;for(const id of g.people){const direct=sets.direct.has(id),w=direct?250:184,h=direct?128:100;nodes.set(id,{id,x,y:g.rank*250,w,h,rank:g.rank,generation:generation.get(id),direct});x+=w+28;}}
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(const n of nodes.values()){minX=Math.min(minX,n.x);maxX=Math.max(maxX,n.x+n.w);minY=Math.min(minY,n.y);maxY=Math.max(maxY,n.y+n.h);}
+  return {nodes,bounds:{x:minX-100,y:minY-100,w:maxX-minX+200,h:maxY-minY+240},generationCount:rows.size,exceptions};
+ }
  // A spouse group must face the same way as the branches above it. GEDCOM
  // record order is not visual order: keeping it here can put the child of
  // the left family on the right and force two otherwise independent parent
